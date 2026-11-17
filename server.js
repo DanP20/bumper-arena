@@ -392,21 +392,23 @@ function stepRoom(room, now) {
   const b = room.ball;
   for (let s = 0; s < SUBSTEPS; s++) {
     for (const p of room.players) {
-      if (p.bot) {
-        // bots push in any direction; their car just turns to face the way it is moving
+      if (p.bot || p.abs) {
+        // bots and touch-stick players push in any direction on the rink; the car turns to face that way
         let ix = p.ix, iz = p.iz; const n = Math.hypot(ix, iz);
         if (n > 1) { ix /= n; iz /= n; }
         if (p.wantDash) {
           p.wantDash = false;
-          if (p.dashCd <= 0 && n > 0.1) {
-            p.vx += ix / n * DASH_IMPULSE; p.vz += iz / n * DASH_IMPULSE;
+          const dx = n > 0.1 ? ix / n : Math.cos(p.h), dz = n > 0.1 ? iz / n : Math.sin(p.h);
+          if (p.dashCd <= 0 && (n > 0.1 || !p.bot)) {
+            p.vx += dx * DASH_IMPULSE; p.vz += dz * DASH_IMPULSE;
             p.dashCd = CFG.DASH_CD; p.dashT = DASH_TIME;
             room.events.push(['dash', p.id]);
           }
         }
         p.vx += ix * ACCEL * DT; p.vz += iz * ACCEL * DT;
-        if (Math.hypot(p.vx, p.vz) > 0.8) {
-          let da = Math.atan2(p.vz, p.vx) - p.h;
+        const steerByStick = !p.bot && n > 0.2;
+        if (steerByStick || Math.hypot(p.vx, p.vz) > 0.8) {
+          let da = (steerByStick ? Math.atan2(iz, ix) : Math.atan2(p.vz, p.vx)) - p.h;
           da = Math.atan2(Math.sin(da), Math.cos(da));
           p.h += da * (1 - Math.exp(-12 * DT));
         }
@@ -509,6 +511,7 @@ wss.on('connection', (ws, req) => {
     } else if (m.t === 'in' && player && !player.bot) {
       player.ix = clamp(Number(m.x) || 0, -1, 1);
       player.iz = clamp(Number(m.z) || 0, -1, 1);
+      player.abs = !!m.a; // touch stick: x/z are a direction on the rink, not steer/throttle
       if (m.d && !room.paused) player.wantDash = true;
     } else if (m.t === 'pause') {
       setPause(room, !!m.on, ws.pname);
