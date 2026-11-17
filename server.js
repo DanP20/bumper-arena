@@ -42,6 +42,16 @@ const server = http.createServer((req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); }
   catch { res.writeHead(400).end(); return; }
+  if (urlPath === '/api/room') { // lets the join screen say whose game a link leads to before joining
+    const name = cleanRoom(new URL(req.url, 'http://x').searchParams.get('room'));
+    const room = rooms.get(name);
+    const body = room
+      ? { exists: true, size: room.size, humans: humans(room).map(p => p.name), spectators: room.spectators.size }
+      : { exists: false };
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(body));
+    return;
+  }
   let root = PUBLIC_DIR;
   if (urlPath.startsWith('/vendor/three/')) { root = THREE_DIR; urlPath = urlPath.slice('/vendor/three'.length); }
   if (urlPath === '/') urlPath = '/index.html';
@@ -56,6 +66,10 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
+
+function cleanRoom(raw) {
+  return String(raw || 'lobby').toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24) || 'lobby';
+}
 
 function lanAddress() {
   for (const list of Object.values(os.networkInterfaces())) {
@@ -391,8 +405,7 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
   let roomName = 'lobby';
   try {
-    roomName = (new URL(req.url, 'http://x').searchParams.get('room') || 'lobby')
-      .toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24) || 'lobby';
+    roomName = cleanRoom(new URL(req.url, 'http://x').searchParams.get('room'));
   } catch { /* keep default */ }
   let room = null, player = null;
   ws.on('message', data => {

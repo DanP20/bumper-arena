@@ -54,9 +54,15 @@
     border: 1px solid rgba(140,170,255,.4); background: rgba(255,255,255,.06); color: #e9f1ff; }
   #join .modes button.on { border-color: var(--gold); color: var(--gold); background: rgba(255,230,107,.14); box-shadow: 0 0 14px rgba(255,230,107,.3); }
   #join .hint { font-size: 11px; opacity: .6; margin-top: 6px; }
+  #joininfo { margin-top: 12px; padding: 9px 10px; border-radius: 10px; font-size: 14px; font-weight: 700; background: rgba(34,229,255,.1); border: 1px solid rgba(34,229,255,.35); }
+  #joininfo:empty { display: none; }
   #join .share { margin-top: 16px; font-size: 12px; opacity: .75; word-break: break-all; }
   #status { bottom: 14px; left: 12px; font-size: 12px; opacity: .7; }
-  @media (max-width: 700px) { #roster { display: none; } #score .team { display: none; } }
+  #roster .row.bot { opacity: .6; }
+  #roster .tag { font-size: 9px; font-weight: 800; letter-spacing: .08em; padding: 1px 5px; border-radius: 6px; margin-right: 5px; border: 1px solid currentColor; }
+  #toast { top: 84px; left: 50%; transform: translateX(-50%); font-size: 14px; font-weight: 700; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 700px) { #roster { top: 84px; font-size: 11px; min-width: 0; padding: 6px 10px; } #roster h1 { display: none; } #score .team { display: none; } #toast { top: auto; bottom: 70px; } }
 </style>
 <script type="importmap">
 { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
@@ -85,6 +91,7 @@
 </div>
 
 <div id="banner" class="hud"></div>
+<div id="toast" class="hud panel"></div>
 
 <div id="bottom" class="hud">
   <div id="dashbar"><div id="dashfill"></div></div>
@@ -97,10 +104,13 @@
     <h2>BUMPER ARENA</h2>
     <p>Bumper-car hockey on a frozen lake. Ram the glowing puck into the other team's goal. Bots fill any empty seats.</p>
     <input id="name" maxlength="14" placeholder="Your name" autocomplete="off">
-    <div class="modes"><button id="mode1" type="button">1 v 1</button><button id="mode2" type="button">2 v 2</button></div>
-    <div class="hint">The first player into a room picks the mode; everyone who joins the link plays it.</div>
+    <div id="joininfo"></div>
+    <div id="hostopts">
+      <div class="modes"><button id="mode1" type="button">1 v 1</button><button id="mode2" type="button">2 v 2</button></div>
+      <div class="hint">You are the host: pick the mode, then share the link below. Empty seats are filled by bots.</div>
+    </div>
     <button id="play">PLAY</button>
-    <div class="share">This is your own private game. Send colleagues this link to join it:<br><b id="sharelink"></b><br><button class="btn" id="copy2" type="button" style="margin-top:8px">Copy link</button></div>
+    <div class="share"><span id="sharelabel">Send colleagues this link to join your game:</span><br><b id="sharelink"></b><br><button class="btn" id="copy2" type="button" style="margin-top:8px">Copy link</button></div>
   </div>
 </div>
 

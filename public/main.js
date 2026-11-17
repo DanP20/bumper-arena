@@ -19,11 +19,16 @@ function newRoomCode() {
   return `${pick(A)}-${pick(B)}-${Math.floor(100 + Math.random() * 900)}`;
 }
 let roomName = (params.get('room') || '').toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24);
+// Whoever opens the plain address is the host of a new game; anyone arriving on a ?room= link is a guest of that game.
 if (!roomName) {
   roomName = newRoomCode();
   params.set('room', roomName);
   history.replaceState(null, '', `${location.pathname}?${params}`);
+  try { sessionStorage.setItem('ba-host', roomName); } catch { /* private mode */ }
 }
+let isHost = false;
+try { isHost = sessionStorage.getItem('ba-host') === roomName; } catch { /* private mode */ }
+const linkMode = params.get('mode') === '1' ? 1 : params.get('mode') === '2' ? 2 : 0;
 $('roomname').textContent = roomName;
 $('sharelink').textContent = location.href;
 
@@ -349,7 +354,8 @@ function makePlayerView(info) {
   add(new THREE.SphereGeometry(0.16, 12, 10), ringMat, -R * 0.9, 3.6, 0);              // spark tip
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(R * 1.3, 28), new THREE.MeshBasicMaterial({ color: 0x1b2a4a, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.03; shadow.scale.set(1.15, 1, 1); car.add(shadow);
-  const label = nameSprite(info.name, info.id === myId ? '#ffffff' : TEAM_CSS[info.team]);
+  const label = nameSprite(info.bot ? `BOT ${info.name}` : info.name, info.bot ? '#aab6cc' : info.id === myId ? '#ffffff' : TEAM_CSS[info.team]);
+  if (info.bot) label.scale.multiplyScalar(0.8);
   label.position.y = 5.2; g.add(label);
   let marker = null;
   if (info.id === myId) {
@@ -361,7 +367,7 @@ function makePlayerView(info) {
   const heading = info.team === 0 ? 0 : Math.PI;
   car.rotation.y = heading;
   scene.add(g);
-  return { g, car, heading, ring, ringMat, label, marker, name: info.name, team: info.team, slot: info.slot, x: 0, z: 0, tx: 0, tz: 0, vx: 0, vz: 0, fresh: true, dash: 0, dashCd: 0, isMe: info.id === myId };
+  return { g, car, heading, ring, ringMat, label, marker, name: info.name, team: info.team, slot: info.slot, bot: info.bot, x: 0, z: 0, tx: 0, tz: 0, vx: 0, vz: 0, fresh: true, dash: 0, dashCd: 0, isMe: info.id === myId };
 }
 
 function disposeView(v) {
@@ -370,12 +376,18 @@ function disposeView(v) {
 }
 
 function applyRoster(list) {
+  // announce people arriving and leaving, so it is obvious the game is shared
+  const before = new Set(roster.filter(p => !p.bot).map(p => p.name)), after = new Set(list.filter(p => !p.bot).map(p => p.name));
+  if (roster.length) {
+    for (const n of after) if (!before.has(n)) toast(`${n} joined the game`);
+    for (const n of before) if (!after.has(n)) toast(`${n} left — a bot took over`);
+  }
   roster = list;
   const seen = new Set();
   for (const info of list) {
     seen.add(info.id);
     let v = players.get(info.id);
-    if (v && (v.name !== info.name || v.isMe !== (info.id === myId))) {
+    if (v && (v.name !== info.name || v.bot !== info.bot || v.isMe !== (info.id === myId))) {
       const old = v; v = makePlayerView(info);
       Object.assign(v, { x: old.x, z: old.z, tx: old.tx, tz: old.tz, fresh: old.fresh, heading: old.heading });
       disposeView(old); players.set(info.id, v);
@@ -390,10 +402,12 @@ function renderRoster() {
   for (const team of [0, 1]) {
     for (const p of roster.filter(q => q.team === team)) {
       const row = document.createElement('div');
-      row.className = 'row' + (p.id === myId ? ' me' : '');
+      row.className = 'row' + (p.id === myId ? ' me' : '') + (p.bot ? ' bot' : '');
       row.style.color = TEAM_CSS[team];
-      const n = document.createElement('span'); n.textContent = p.name + (p.id === myId ? ' (you)' : '');
-      const i = document.createElement('i'); i.textContent = (p.bot ? 'bot · ' : '') + p.goals + (p.goals === 1 ? ' goal' : ' goals');
+      const n = document.createElement('span');
+      const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = p.bot ? 'BOT' : p.id === myId ? 'YOU' : 'PLAYER';
+      n.append(tag, p.name);
+      const i = document.createElement('i'); i.textContent = p.goals + (p.goals === 1 ? ' goal' : ' goals');
       row.append(n, i); el.append(row);
     }
   }
@@ -552,6 +566,11 @@ function banner(html, color, ms = 1800) {
   clearTimeout(bannerTimer);
   if (ms) bannerTimer = setTimeout(() => b.classList.remove('show'), ms);
 }
+let toastTimer = 0;
+function toast(text) {
+  const t = $('toast'); t.textContent = text; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 $('copy2').onclick = async e => {
   const btn = e.currentTarget;
@@ -655,14 +674,37 @@ function sendInput(now) {
 
 // ---------- join screen ----------
 const nameInput = $('name');
-let modeSize = localStorage.getItem('ba-mode') === '1' ? 1 : 2;
-function setMode(n) {
+let modeSize = linkMode || (isHost && localStorage.getItem('ba-mode') === '1' ? 1 : 2);
+function setMode(n) { // host only: the choice travels in the link, so guests get the same game
   modeSize = n; localStorage.setItem('ba-mode', String(n));
   $('mode1').classList.toggle('on', n === 1); $('mode2').classList.toggle('on', n === 2);
+  params.set('mode', String(n));
+  history.replaceState(null, '', `${location.pathname}?${params}`);
+  $('sharelink').textContent = location.href;
 }
 $('mode1').onclick = () => setMode(1);
 $('mode2').onclick = () => setMode(2);
-setMode(modeSize);
+if (isHost) setMode(modeSize);
+else { $('hostopts').style.display = 'none'; $('sharelabel').textContent = 'You were invited to this game. Its link:'; }
+
+// Tell people what the link leads to before they press Play.
+async function refreshJoinInfo() {
+  if (joined) return;
+  let info = null;
+  try { info = await (await fetch(`/api/room?room=${encodeURIComponent(roomName)}`, { cache: 'no-store' })).json(); } catch { /* offline */ }
+  if (joined) return;
+  const el = $('joininfo');
+  if (info && info.exists && info.humans.length) {
+    const who = info.humans.join(', '), full = info.humans.length >= info.size * 2;
+    el.textContent = full
+      ? `${who} are playing ${info.size} v ${info.size} here. The game is full, so you will watch.`
+      : `${isHost ? 'Already in your game' : 'You are joining'}: ${who} — ${info.size} v ${info.size}.`;
+    if (!isHost) modeSize = info.size;
+  } else if (isHost) el.textContent = 'New game — nobody else is here yet.';
+  else el.textContent = `Nobody is in this game yet. It is set to ${modeSize} v ${modeSize}; press Play and the others will join you.`;
+  setTimeout(refreshJoinInfo, 2000);
+}
+refreshJoinInfo();
 nameInput.value = localStorage.getItem('ba-name') || '';
 function start() {
   if (joined) return;
