@@ -662,10 +662,37 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) keys.delete(k); });
 addEventListener('blur', () => keys.clear());
+// touch: left stick drives the car (up = forward, down = reverse, sideways = steer), right button dashes
+const touchIn = { x: 0, z: 0 };
+const isTouch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
+if (isTouch) document.body.classList.add('touch');
+{
+  const stick = $('stick'), knob = $('knob'), R = 52;
+  let pid = null;
+  const move = e => {
+    const r = stick.getBoundingClientRect();
+    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    const d = Math.hypot(dx, dy);
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const dead = v => (Math.abs(v) < 0.18 ? 0 : v);
+    touchIn.x = dead(dx / R); touchIn.z = dead(dy / R);
+  };
+  const end = e => { if (e.pointerId !== pid) return; pid = null; touchIn.x = touchIn.z = 0; knob.style.transform = ''; };
+  stick.addEventListener('pointerdown', e => { pid = e.pointerId; try { stick.setPointerCapture(pid); } catch { /* pointer already gone */ } move(e); e.preventDefault(); });
+  stick.addEventListener('pointermove', e => { if (e.pointerId === pid) move(e); });
+  stick.addEventListener('pointerup', end); stick.addEventListener('pointercancel', end);
+  const dash = $('dashbtn');
+  dash.addEventListener('pointerdown', e => { dashQueued = true; dash.classList.add('down'); e.preventDefault(); });
+  for (const t of ['pointerup', 'pointercancel', 'pointerleave']) dash.addEventListener(t, () => dash.classList.remove('down'));
+  document.addEventListener('contextmenu', e => { if (isTouch) e.preventDefault(); });
+}
 function sendInput(now) {
   if (!ws || ws.readyState !== 1 || myId == null || myId < 0) return;
-  const x = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0), z = (keys.has('d') ? 1 : 0) - (keys.has('u') ? 1 : 0);
+  const cl = v => Math.max(-1, Math.min(1, Math.round(v * 10) / 10));
+  const x = cl((keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0) + touchIn.x), z = cl((keys.has('d') ? 1 : 0) - (keys.has('u') ? 1 : 0) + touchIn.z);
   const sig = x + ',' + z;
+  if (sig !== lastSent && !dashQueued && now - lastSendT < 45) return; // cap analog stick updates at ~22 a second
   if (sig !== lastSent || dashQueued || now - lastSendT > 250) {
     ws.send(JSON.stringify({ t: 'in', x, z, d: dashQueued ? 1 : 0 }));
     lastSent = sig; lastSendT = now; dashQueued = false;
@@ -712,6 +739,11 @@ function start() {
   const name = nameInput.value.trim() || 'Player';
   localStorage.setItem('ba-name', name);
   $('join').style.display = 'none';
+  document.body.classList.add('playing');
+  nameInput.blur();
+  if (isTouch) { // best effort: go full screen and sideways where the phone allows it
+    try { const p = document.documentElement.requestFullscreen?.(); p?.then(() => screen.orientation?.lock?.('landscape')?.catch(() => {})).catch(() => {}); } catch { /* not supported */ }
+  }
   initAudio();
   connect(name);
 }
@@ -772,4 +804,4 @@ function frame() {
 frame();
 
 // small hook for automated checks
-window.__ba = { net, players, camera, get ball() { return ballView; }, get roster() { return roster; }, get id() { return myId; }, keys };
+window.__ba = { net, players, camera, touchIn, get ball() { return ballView; }, get roster() { return roster; }, get id() { return myId; }, keys };

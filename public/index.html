@@ -2,13 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Bumper Arena</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%23101a3a' stroke='%2322e5ff' stroke-width='4'/><circle cx='16' cy='16' r='4' fill='%23ffe66b'/></svg>">
 <style>
   :root { --cyan: #22e5ff; --pink: #ff4fd8; --gold: #ffe66b; --ink: #0b1630; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: #e9f1ff;
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: #e9f1ff; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
   .hud { position: fixed; z-index: 2; pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,.8); }
@@ -47,6 +50,7 @@
   #join input { width: 100%; padding: 12px 14px; font-size: 18px; border-radius: 10px; border: 1px solid rgba(140,170,255,.4);
     background: rgba(255,255,255,.07); color: #fff; text-align: center; outline: none; }
   #join input:focus { border-color: var(--cyan); }
+  #join input, #sharelink { -webkit-user-select: text; user-select: text; }
   #play { width: 100%; margin-top: 12px; padding: 12px; font-size: 18px; font-weight: 800; letter-spacing: .1em; border: 0; border-radius: 10px;
     background: linear-gradient(90deg, var(--cyan), var(--pink)); color: #06101f; }
   #join .modes { display: flex; gap: 8px; margin-top: 12px; }
@@ -54,6 +58,27 @@
     border: 1px solid rgba(140,170,255,.4); background: rgba(255,255,255,.06); color: #e9f1ff; }
   #join .modes button.on { border-color: var(--gold); color: var(--gold); background: rgba(255,230,107,.14); box-shadow: 0 0 14px rgba(255,230,107,.3); }
   #join .hint { font-size: 11px; opacity: .6; margin-top: 6px; }
+  /* touch controls (phones and tablets) */
+  #touch { display: none; }
+  body.touch.playing #touch { display: block; }
+  body.touch #bottom .keys { display: none; }
+  body.touch #bottom { bottom: max(10px, env(safe-area-inset-bottom)); }
+  #stick { position: fixed; z-index: 3; left: max(22px, env(safe-area-inset-left)); bottom: max(22px, env(safe-area-inset-bottom)); width: 140px; height: 140px; border-radius: 50%;
+    background: rgba(8,12,28,.35); border: 2px solid rgba(190,220,255,.45); touch-action: none; }
+  #stick::before { content: '▲'; position: absolute; top: 6px; left: 0; right: 0; text-align: center; font-size: 12px; opacity: .6; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
+    background: rgba(255,255,255,.3); border: 2px solid #fff; box-shadow: 0 0 14px rgba(255,255,255,.5); pointer-events: none; }
+  #dashbtn { position: fixed; z-index: 3; right: max(26px, env(safe-area-inset-right)); bottom: max(34px, env(safe-area-inset-bottom)); width: 104px; height: 104px; border-radius: 50%;
+    background: rgba(255,230,107,.2); border: 2px solid var(--gold); color: var(--gold); font-weight: 900; letter-spacing: .1em; font-size: 16px; touch-action: none; }
+  #dashbtn:active, #dashbtn.down { background: rgba(255,230,107,.5); }
+  #rotate { display: none; top: 150px; left: 50%; transform: translateX(-50%); font-size: 13px; text-align: center; }
+  @media (orientation: portrait) { body.touch.playing #rotate { display: block; } }
+  @media (max-height: 460px) { /* phones held sideways */
+    #roster { font-size: 11px; padding: 6px 10px; min-width: 0; } #roster h1 { display: none; }
+    #score { padding: 4px 12px; } #score .num { font-size: 28px; }
+    #join .card { padding: 12px 18px; } #join h2 { font-size: 22px; } #join p { display: none; } #join .hint { display: none; }
+    #join input, #play { padding: 8px; font-size: 16px; } #join .share { margin-top: 8px; }
+  }
   #joininfo { margin-top: 12px; padding: 9px 10px; border-radius: 10px; font-size: 14px; font-weight: 700; background: rgba(34,229,255,.1); border: 1px solid rgba(34,229,255,.35); }
   #joininfo:empty { display: none; }
   #join .share { margin-top: 16px; font-size: 12px; opacity: .75; word-break: break-all; }
@@ -62,7 +87,8 @@
   #roster .tag { font-size: 9px; font-weight: 800; letter-spacing: .08em; padding: 1px 5px; border-radius: 6px; margin-right: 5px; border: 1px solid currentColor; }
   #toast { top: 84px; left: 50%; transform: translateX(-50%); font-size: 14px; font-weight: 700; opacity: 0; transition: opacity .3s; white-space: nowrap; }
   #toast.show { opacity: 1; }
-  @media (max-width: 700px) { #roster { top: 84px; font-size: 11px; min-width: 0; padding: 6px 10px; } #roster h1 { display: none; } #score .team { display: none; } #toast { top: auto; bottom: 70px; } }
+  @media (max-width: 700px) { #roster { top: 84px; font-size: 11px; min-width: 0; padding: 6px 10px; } #roster h1 { display: none; } #score .team { display: none; } #toast { top: auto; bottom: 70px; }
+    #score { left: 12px; transform: none; padding: 6px 12px; gap: 10px; } #score .num { font-size: 30px; } }
 </style>
 <script type="importmap">
 { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
@@ -98,6 +124,11 @@
   <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · M to mute · first to <span id="winat">5</span> wins</div>
 </div>
 <div id="status" class="hud"></div>
+<div id="rotate" class="hud panel">Turn your phone sideways for a bigger view</div>
+<div id="touch">
+  <div id="stick"><div id="knob"></div></div>
+  <button id="dashbtn" type="button">DASH</button>
+</div>
 
 <div id="join">
   <div class="card panel">
