@@ -1,0 +1,9 @@
+{
+  "name": "bumper-arena",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bumper Arena - 2v2 neon bumper-ball hockey for the browser",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "three": "^0.187.0", "ws": "^8.23.0" },
+  "engines": { "node": ">=20" }
+}

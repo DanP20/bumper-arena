@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bumper Arena</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%23101a3a' stroke='%2322e5ff' stroke-width='4'/><circle cx='16' cy='16' r='4' fill='%23ffe66b'/></svg>">
+<style>
+  :root { --cyan: #22e5ff; --pink: #ff4fd8; --gold: #ffe66b; --ink: #0b1630; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: #e9f1ff;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hud { position: fixed; z-index: 2; pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,.8); }
+  .panel { background: rgba(8,12,28,.55); border: 1px solid rgba(140,170,255,.25); border-radius: 12px;
+    padding: 10px 14px; backdrop-filter: blur(6px); }
+  #score { top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 18px;
+    font-weight: 800; letter-spacing: .06em; }
+  #score .team { font-size: 13px; opacity: .9; }
+  #score .num { font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 34px; text-align: center; }
+  #score .c { color: var(--cyan); text-shadow: 0 0 14px var(--cyan); }
+  #score .m { color: var(--pink); text-shadow: 0 0 14px var(--pink); }
+  #score .dash { opacity: .5; font-size: 24px; }
+  #score small { display: block; font-size: 10px; font-weight: 600; opacity: .6; letter-spacing: .12em; text-align: center; }
+  #roster { top: 12px; left: 12px; font-size: 13px; min-width: 170px; }
+  #roster h1 { margin: 0 0 2px; font-size: 15px; letter-spacing: .18em; color: var(--gold); }
+  #roster .room { font-size: 11px; opacity: .65; margin-bottom: 6px; }
+  #roster .row { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; }
+  #roster .row.me { font-weight: 800; }
+  #roster .row i { font-style: normal; opacity: .55; font-size: 11px; }
+  #topright { top: 12px; right: 12px; display: flex; gap: 8px; pointer-events: auto; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .btn { background: rgba(8,12,28,.6); border: 1px solid rgba(140,170,255,.35); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .btn:hover { border-color: var(--cyan); }
+  #bottom { bottom: 14px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 12px; }
+  #dashbar { width: 180px; height: 8px; border-radius: 6px; background: rgba(255,255,255,.14); margin: 0 auto 6px; overflow: hidden; }
+  #dashfill { height: 100%; width: 100%; background: var(--gold); box-shadow: 0 0 10px var(--gold); }
+  #bottom .keys { opacity: .7; }
+  #banner { top: 26%; left: 50%; transform: translate(-50%,-50%); text-align: center; font-weight: 900;
+    font-size: clamp(40px, 9vw, 110px); letter-spacing: .04em; opacity: 0; transition: opacity .2s; white-space: nowrap; }
+  #banner.show { opacity: 1; }
+  #banner small { display: block; font-size: .24em; font-weight: 700; letter-spacing: .1em; margin-top: 6px; color: #e9f1ff; text-shadow: 0 0 8px #000; }
+  #join { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(6,9,19,.55), rgba(6,9,19,.92)); }
+  #join .card { width: min(420px, 92vw); text-align: center; padding: 26px 26px 22px; }
+  #join h2 { margin: 0; font-size: 34px; letter-spacing: .14em; color: var(--gold); text-shadow: 0 0 18px rgba(255,230,107,.6); }
+  #join p { margin: 8px 0 18px; opacity: .8; font-size: 14px; line-height: 1.45; }
+  #join input { width: 100%; padding: 12px 14px; font-size: 18px; border-radius: 10px; border: 1px solid rgba(140,170,255,.4);
+    background: rgba(255,255,255,.07); color: #fff; text-align: center; outline: none; }
+  #join input:focus { border-color: var(--cyan); }
+  #play { width: 100%; margin-top: 12px; padding: 12px; font-size: 18px; font-weight: 800; letter-spacing: .1em; border: 0; border-radius: 10px;
+    background: linear-gradient(90deg, var(--cyan), var(--pink)); color: #06101f; }
+  #join .modes { display: flex; gap: 8px; margin-top: 12px; }
+  #join .modes button { flex: 1; padding: 10px; font-size: 16px; font-weight: 800; letter-spacing: .08em; border-radius: 10px;
+    border: 1px solid rgba(140,170,255,.4); background: rgba(255,255,255,.06); color: #e9f1ff; }
+  #join .modes button.on { border-color: var(--gold); color: var(--gold); background: rgba(255,230,107,.14); box-shadow: 0 0 14px rgba(255,230,107,.3); }
+  #join .hint { font-size: 11px; opacity: .6; margin-top: 6px; }
+  #join .share { margin-top: 16px; font-size: 12px; opacity: .75; word-break: break-all; }
+  #status { bottom: 14px; left: 12px; font-size: 12px; opacity: .7; }
+  @media (max-width: 700px) { #roster { display: none; } #score .team { display: none; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="roster" class="hud panel">
+  <h1>BUMPER ARENA</h1>
+  <div class="room">room: <span id="roomname">lobby</span> · <span id="modename">2 v 2</span></div>
+  <div id="rosterlist"></div>
+</div>
+
+<div id="score" class="hud panel">
+  <span class="team c">CYAN</span>
+  <span class="num c" id="s0">0</span>
+  <span class="dash">:</span>
+  <span class="num m" id="s1">0</span>
+  <span class="team m">PINK</span>
+</div>
+
+<div id="topright" class="hud">
+  <button class="btn" id="copy" title="Copy the link to this room">Copy invite link</button>
+  <button class="btn" id="mute" title="Mute / unmute (M)">🔊</button>
+</div>
+
+<div id="banner" class="hud"></div>
+
+<div id="bottom" class="hud">
+  <div id="dashbar"><div id="dashfill"></div></div>
+  <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · M to mute · first to <span id="winat">5</span> wins</div>
+</div>
+<div id="status" class="hud"></div>
+
+<div id="join">
+  <div class="card panel">
+    <h2>BUMPER ARENA</h2>
+    <p>Bumper-car hockey on a frozen lake. Ram the glowing puck into the other team's goal. Bots fill any empty seats.</p>
+    <input id="name" maxlength="14" placeholder="Your name" autocomplete="off">
+    <div class="modes"><button id="mode1" type="button">1 v 1</button><button id="mode2" type="button">2 v 2</button></div>
+    <div class="hint">The first player into a room picks the mode; everyone who joins the link plays it.</div>
+    <button id="play">PLAY</button>
+    <div class="share">Send colleagues this link to join your room:<br><b id="sharelink"></b></div>
+  </div>
+</div>
+
+<script type="module" src="/main.js"></script>
+</body>
+</html>
