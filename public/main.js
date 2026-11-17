@@ -11,7 +11,19 @@ const TEAM_CSS = ['#22e5ff', '#ff4fd8'];
 const TEAM_NAME = ['CYAN', 'PINK'];
 
 const params = new URLSearchParams(location.search);
-const roomName = (params.get('room') || 'lobby').toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24) || 'lobby';
+// Every visitor without a ?room= link gets a private room of their own, with its code put in the address bar to share.
+function newRoomCode() {
+  const A = ['icy', 'snowy', 'frosty', 'chilly', 'glacial', 'polar', 'wintry', 'slippy', 'bumpy', 'zippy'];
+  const B = ['puck', 'pine', 'yeti', 'moose', 'otter', 'penguin', 'husky', 'comet', 'sled', 'lynx'];
+  const pick = l => l[Math.floor(Math.random() * l.length)];
+  return `${pick(A)}-${pick(B)}-${Math.floor(100 + Math.random() * 900)}`;
+}
+let roomName = (params.get('room') || '').toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24);
+if (!roomName) {
+  roomName = newRoomCode();
+  params.set('room', roomName);
+  history.replaceState(null, '', `${location.pathname}?${params}`);
+}
 $('roomname').textContent = roomName;
 $('sharelink').textContent = location.href;
 
@@ -541,6 +553,11 @@ function banner(html, color, ms = 1800) {
   if (ms) bannerTimer = setTimeout(() => b.classList.remove('show'), ms);
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+$('copy2').onclick = async e => {
+  const btn = e.currentTarget;
+  try { await navigator.clipboard.writeText(location.href); btn.textContent = 'Copied!'; } catch { btn.textContent = 'Copy it from above'; }
+  setTimeout(() => { btn.textContent = 'Copy link'; }, 2500);
+};
 $('copy').onclick = async e => {
   const btn = e.currentTarget;
   try { await navigator.clipboard.writeText(location.href); btn.textContent = 'Link copied!'; }
