@@ -736,7 +736,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) keys.delete(k); });
 addEventListener('blur', () => keys.clear());
-// touch: left stick drives the car (up = forward, down = reverse, sideways = steer), right button dashes
+// touch: push the left stick the way you want to travel on screen; right button dashes
 const touchIn = { x: 0, z: 0 };
 const isTouch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
 if (isTouch) document.body.classList.add('touch');
@@ -764,7 +764,17 @@ if (isTouch) document.body.classList.add('touch');
 function sendInput(now) {
   if (!ws || ws.readyState !== 1 || myId == null || myId < 0) return;
   const cl = v => Math.max(-1, Math.min(1, Math.round(v * 10) / 10));
-  const x = cl((keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0) + touchIn.x), z = cl((keys.has('d') ? 1 : 0) - (keys.has('u') ? 1 : 0) + touchIn.z);
+  let tx = 0, tz = 0;
+  const mag = Math.min(1, Math.hypot(touchIn.x, touchIn.z)), me = players.get(myId);
+  if (mag > 0 && me && me.th != null) {
+    // Touch stick: push the way you want to go on screen. The car steers itself round to that
+    // direction and drives, easing off the throttle while it is still pointing the wrong way.
+    const h = -me.th, want = Math.atan2(touchIn.z, touchIn.x);
+    const diff = Math.atan2(Math.sin(want - h), Math.cos(want - h));
+    tx = Math.max(-1, Math.min(1, diff * 2.2));
+    tz = -mag * Math.max(0.12, Math.cos(diff));
+  }
+  const x = cl((keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0) + tx), z = cl((keys.has('d') ? 1 : 0) - (keys.has('u') ? 1 : 0) + tz);
   const sig = x + ',' + z;
   if (sig !== lastSent && !dashQueued && now - lastSendT < 45) return; // cap analog stick updates at ~22 a second
   if (sig !== lastSent || dashQueued || now - lastSendT > 250) {

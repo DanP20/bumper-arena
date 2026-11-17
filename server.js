@@ -343,7 +343,7 @@ function botThink(room, p) {
     const align = ((px - p.x) * dx + (pz - p.z) * dz) / (myD || 1);
     if (align > 0.7) {
       tx = px + dx * 2.5; tz = pz + dz * 2.5;
-      if (myD < 5.5 && p.dashCd <= 0 && Math.random() < 0.25) dash = true;
+      if (myD < 5.5 && p.dashCd <= 0 && Math.random() < 0.08) dash = true;
     } else {
       const off = PR + BR + 0.8;
       tx = px - dx * off; tz = pz - dz * off;
@@ -358,7 +358,7 @@ function botThink(room, p) {
   const want = Math.min(21, d * 4);
   let sx = ex / d * want - p.vx, sz = ez / d * want - p.vz;
   const sn = Math.hypot(sx, sz) || 1;
-  const skill = 0.8;
+  const skill = 0.6; // bots use a bit over half the acceleration a person has
   p.ix = sx / sn * skill; p.iz = sz / sn * skill;
   if (dash) p.wantDash = true;
 }
@@ -387,7 +387,7 @@ function stepRoom(room, now) {
   }
 
   for (const p of room.players) {
-    if (p.bot && --p.think <= 0) { p.think = 3; botThink(room, p); }
+    if (p.bot && --p.think <= 0) { p.think = 5; botThink(room, p); } // bots react ~6 times a second
   }
   const b = room.ball;
   for (let s = 0; s < SUBSTEPS; s++) {
