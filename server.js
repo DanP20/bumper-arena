@@ -33,7 +33,7 @@ const SOLO_SPAWN = [-9, 0];             // 1v1 rooms
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.ico': 'image/x-icon',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
 };
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
@@ -80,7 +80,17 @@ const server = http.createServer((req, res) => {
   }
   let root = PUBLIC_DIR;
   if (urlPath.startsWith('/vendor/three/')) { root = THREE_DIR; urlPath = urlPath.slice('/vendor/three'.length); }
-  if (urlPath === '/') urlPath = '/index.html';
+  if (urlPath === '/' || urlPath === '/index.html') {
+    // fill in this site's own address for the link-preview tags
+    const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0];
+    const origin = `${proto}://${String(req.headers.host || '').replace(/[^\w.:\-]/g, '')}`;
+    fs.readFile(path.join(PUBLIC_DIR, 'index.html'), 'utf8', (err, html) => {
+      if (err) { res.writeHead(500).end(); return; }
+      res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+      res.end(html.split('__ORIGIN__').join(origin));
+    });
+    return;
+  }
   const file = path.normalize(path.join(root, urlPath));
   if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
@@ -141,6 +151,7 @@ function getRoom(name, size) {
       ball: { x: 0, z: 0, vx: 0, vz: 0, m: B_MASS, r: BR },
       score: [0, 0], state: 'countdown', until: Date.now() + COUNTDOWN_MS,
       lastTouch: null, events: [], winner: -1,
+      win: CFG.WIN, order: [], paused: null,
     };
     for (let team = 0; team < 2; team++)
       for (let slot = 0; slot < room.size; slot++) makePlayer(room, team, slot, true, botName(room), null);
@@ -161,7 +172,9 @@ function sendRoster(room) {
   broadcast(room, {
     t: 'roster',
     players: room.players.map(p => ({ id: p.id, name: p.name, team: p.team, slot: p.slot, bot: p.bot, goals: p.goals })),
-    spectators: room.spectators.size,
+    spectators: room.spectators.size, size: room.size, win: room.win,
+    host: room.order[0] && room.order[0].player ? room.order[0].player.id : -1,
+    hostName: room.order[0] ? room.order[0].pname : '',
   });
 }
 
@@ -173,33 +186,64 @@ function kickoff(room) {
   room.until = Date.now() + COUNTDOWN_MS;
 }
 
-function joinRoom(room, ws, rawName) {
-  const name = String(rawName || '').replace(/[^\w \-.!?']/g, '').trim().slice(0, 14) || 'Player';
+// Put a connected person into a free seat (replacing a bot), or make them a spectator if the game is full.
+function seat(room, ws) {
   const count = [0, 1].map(t => room.players.filter(p => p.team === t && !p.bot).length);
   const team = count[0] <= count[1] ? 0 : 1;
-  const seat = room.players.find(p => p.team === team && p.bot) || room.players.find(p => p.bot);
-  if (!seat) {
-    room.spectators.add(ws);
+  const s = room.players.find(p => p.team === team && p.bot) || room.players.find(p => p.bot);
+  if (!s) {
+    ws.player = null; room.spectators.add(ws);
     send(ws, { t: 'welcome', id: -1, cfg: CFG, room: room.name, size: room.size });
-    sendRoster(room);
-    return null;
+    return;
   }
-  const fresh = humans(room).length === 0;
-  seat.bot = false; seat.ws = ws; seat.name = name; seat.goals = 0; seat.ix = seat.iz = 0;
-  if (fresh) { room.score = [0, 0]; for (const p of room.players) p.goals = 0; kickoff(room); }
-  send(ws, { t: 'welcome', id: seat.id, cfg: CFG, room: room.name, size: room.size });
-  sendRoster(room);
-  return seat;
+  room.spectators.delete(ws);
+  s.bot = false; s.ws = ws; s.name = ws.pname; s.goals = 0; s.ix = s.iz = 0;
+  ws.player = s;
+  send(ws, { t: 'welcome', id: s.id, cfg: CFG, room: room.name, size: room.size });
 }
 
-function leaveRoom(room, ws, player) {
+function joinRoom(room, ws, rawName) {
+  ws.pname = String(rawName || '').replace(/[^\w \-.!?']/g, '').trim().slice(0, 14) || 'Player';
+  const fresh = humans(room).length === 0;
+  room.order.push(ws); // join order: the first one still here is the host
+  seat(room, ws);
+  if (fresh && ws.player) { room.score = [0, 0]; for (const p of room.players) p.goals = 0; kickoff(room); }
+  sendRoster(room);
+}
+
+function leaveRoom(room, ws) {
+  room.order = room.order.filter(w => w !== ws);
   room.spectators.delete(ws);
+  const player = ws.player;
   if (player && player.ws === ws) {
     player.bot = true; player.ws = null; player.ix = player.iz = 0;
     player.name = botName(room);
   }
-  if (humans(room).length === 0 && room.spectators.size === 0) rooms.delete(room.name);
+  ws.player = null;
+  if (room.order.length === 0) rooms.delete(room.name);
   else sendRoster(room);
+}
+
+function setPause(room, on, by) {
+  const now = Date.now();
+  if (on && !room.paused) room.paused = { at: now, by };
+  else if (!on && room.paused) { room.until += now - room.paused.at; room.paused = null; }
+}
+
+// Host only: restart with (possibly) a different team size and goal target.
+function newMatch(room, size, win) {
+  room.win = win;
+  if (size !== room.size) {
+    room.size = size; room.players = []; room.spectators = new Set();
+    for (let team = 0; team < 2; team++)
+      for (let slot = 0; slot < size; slot++) makePlayer(room, team, slot, true, botName(room), null);
+    for (const ws of room.order) seat(room, ws);
+  }
+  room.score = [0, 0]; room.winner = -1; room.paused = null;
+  for (const p of room.players) p.goals = 0;
+  kickoff(room);
+  room.events.push(['new', size, win]);
+  sendRoster(room);
 }
 
 // ---------- physics ----------
@@ -397,7 +441,7 @@ function stepRoom(room, now) {
         if (toucher.team === team) { toucher.goals++; who = toucher.name; }
         else who = toucher.name + ' (own goal)';
       }
-      if (room.score[team] >= CFG.WIN) {
+      if (room.score[team] >= room.win) {
         room.state = 'over'; room.winner = team; room.until = now + OVER_MS;
       } else { room.state = 'goal'; room.until = now + GOAL_MS; }
       room.events.push(['goal', team, who]);
@@ -410,7 +454,8 @@ function snapshot(room, now) {
   const r2 = v => Math.round(v * 100) / 100;
   const b = room.ball;
   const msg = {
-    t: 's', st: room.state, cd: Math.max(0, room.until - now), sc: room.score, w: room.winner,
+    t: 's', st: room.state, cd: Math.max(0, room.until - (room.paused ? room.paused.at : now)), sc: room.score, w: room.winner,
+    pz: room.paused ? room.paused.by : 0,
     b: [r2(b.x), r2(b.z), r2(b.vx), r2(b.vz)],
     p: room.players.map(p => [p.id, r2(p.x), r2(p.z), r2(p.vx), r2(p.vz), Math.max(0, r2(p.dashCd)), p.dashT > 0 ? 1 : 0, r2(p.h)]),
   };
@@ -421,7 +466,7 @@ function snapshot(room, now) {
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
-    stepRoom(room, now);
+    if (!room.paused) stepRoom(room, now);
     broadcast(room, snapshot(room, now));
   }
 }, 1000 / TICK_HZ);
@@ -433,21 +478,30 @@ wss.on('connection', (ws, req) => {
   try {
     roomName = cleanRoom(new URL(req.url, 'http://x').searchParams.get('room'));
   } catch { /* keep default */ }
-  let room = null, player = null;
+  let room = null;
   ws.on('message', data => {
     let m;
     try { m = JSON.parse(data.toString()); } catch { return; }
     if (!m || typeof m !== 'object') return;
+    const player = ws.player;
     if (m.t === 'join' && !room) {
       room = getRoom(roomName, Number(m.size)); // the first player into a room sets 1v1 or 2v2
-      player = joinRoom(room, ws, m.name);
+      joinRoom(room, ws, m.name);
+    } else if (!room) {
+      return;
     } else if (m.t === 'in' && player && !player.bot) {
       player.ix = clamp(Number(m.x) || 0, -1, 1);
       player.iz = clamp(Number(m.z) || 0, -1, 1);
-      if (m.d) player.wantDash = true;
+      if (m.d && !room.paused) player.wantDash = true;
+    } else if (m.t === 'pause') {
+      setPause(room, !!m.on, ws.pname);
+    } else if (m.t === 'new' && room.order[0] === ws) {
+      const size = Number(m.size) === 1 ? 1 : 2;
+      const win = clamp(Math.round(Number(m.win)) || CFG.WIN, 1, 15);
+      newMatch(room, size, win);
     }
   });
-  const bye = () => { if (room) { leaveRoom(room, ws, player); room = null; } };
+  const bye = () => { if (room) { leaveRoom(room, ws); room = null; } };
   ws.on('close', bye);
   ws.on('error', bye);
 });

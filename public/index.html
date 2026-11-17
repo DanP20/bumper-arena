@@ -5,7 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Bumper Arena</title>
+<title>Bumper Arena — bumper-car hockey with friends</title>
+<meta name="description" content="A free browser game: 1v1 or 2v2 bumper-car hockey on a frozen lake. Open the link, share it, and play with friends. No install.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Bumper Arena — bumper-car hockey with friends">
+<meta property="og:description" content="A free browser game: 1v1 or 2v2 bumper-car hockey on a frozen lake. Open the link, share it, and play with friends. No install.">
+<meta property="og:url" content="__ORIGIN__/">
+<meta property="og:image" content="__ORIGIN__/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%23101a3a' stroke='%2322e5ff' stroke-width='4'/><circle cx='16' cy='16' r='4' fill='%23ffe66b'/></svg>">
 <style>
   :root { --cyan: #22e5ff; --pink: #ff4fd8; --gold: #ffe66b; --ink: #0b1630; }
@@ -79,10 +88,31 @@
     #join .card { padding: 12px 18px; } #join h2 { font-size: 22px; } #join p { display: none; } #join .hint { display: none; }
     #join input, #play { padding: 8px; font-size: 16px; } #join .share { margin-top: 8px; }
   }
+  #menu { position: fixed; inset: 0; z-index: 4; display: none; place-items: center; background: rgba(6,9,19,.6); }
+  #menu.show { display: grid; }
+  #menu .card { width: min(380px, 92vw); max-height: 96vh; overflow: auto; text-align: center; padding: 20px 22px; }
+  #menu h2 { margin: 0; font-size: 30px; letter-spacing: .16em; color: var(--gold); }
+  #menu h3 { margin: 14px 0 4px; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; opacity: .8; }
+  #pausedby { font-size: 13px; opacity: .75; margin: 4px 0 12px; }
+  #menu .big { width: 100%; padding: 11px; font-size: 16px; font-weight: 800; letter-spacing: .1em; border: 0; border-radius: 10px;
+    background: linear-gradient(90deg, var(--cyan), var(--pink)); color: #06101f; }
+  #menu .big.alt { margin-top: 12px; background: rgba(255,230,107,.16); color: var(--gold); border: 1px solid var(--gold); }
+  #menu .set { margin-top: 12px; border-top: 1px solid rgba(140,170,255,.25); }
+  #menu .lbl { font-size: 12px; opacity: .7; margin: 8px 0 4px; text-align: left; }
+  #menu .opts { display: flex; gap: 6px; }
+  #menu .opts button { flex: 1; padding: 8px 4px; font-size: 15px; font-weight: 800; border-radius: 9px; border: 1px solid rgba(140,170,255,.4); background: rgba(255,255,255,.06); color: #e9f1ff; }
+  #menu .opts button.on { border-color: var(--gold); color: var(--gold); background: rgba(255,230,107,.14); }
+  #menu.guest .opts button, #menu.guest #newmatch { opacity: .4; pointer-events: none; }
+  #hostnote { font-size: 11px; opacity: .65; margin-top: 8px; }
+  @media (max-height: 460px) { #menu .card { padding: 10px 18px; } #menu h2 { font-size: 20px; } #menu h3 { margin-top: 8px; } #menu .big { padding: 7px; } #pausedby { margin-bottom: 6px; } }
+  @media (max-width: 700px) { #copy { display: none; } }
   #joininfo { margin-top: 12px; padding: 9px 10px; border-radius: 10px; font-size: 14px; font-weight: 700; background: rgba(34,229,255,.1); border: 1px solid rgba(34,229,255,.35); }
   #joininfo:empty { display: none; }
   #join .share { margin-top: 16px; font-size: 12px; opacity: .75; word-break: break-all; }
   #status { bottom: 14px; left: 12px; font-size: 12px; opacity: .7; }
+  #status.bad { top: 40%; bottom: auto; left: 50%; transform: translateX(-50%); font-size: 16px; font-weight: 700; opacity: 1; text-align: center;
+    background: rgba(120,20,30,.8); border: 1px solid #ff6b6b; border-radius: 10px; padding: 10px 16px; max-width: 90vw; }
+  #status.bad:empty { display: none; }
   #roster .row.bot { opacity: .6; }
   #roster .tag { font-size: 9px; font-weight: 800; letter-spacing: .08em; padding: 1px 5px; border-radius: 6px; margin-right: 5px; border: 1px solid currentColor; }
   #toast { top: 84px; left: 50%; transform: translateX(-50%); font-size: 14px; font-weight: 700; opacity: 0; transition: opacity .3s; white-space: nowrap; }
@@ -112,6 +142,7 @@
 </div>
 
 <div id="topright" class="hud">
+  <button class="btn" id="menubtn" title="Pause and match settings (P or Esc)">⏸ Pause</button>
   <button class="btn" id="copy" title="Copy the link to this room">Copy invite link</button>
   <button class="btn" id="mute" title="Mute / unmute (M)">🔊</button>
 </div>
@@ -121,13 +152,30 @@
 
 <div id="bottom" class="hud">
   <div id="dashbar"><div id="dashfill"></div></div>
-  <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · M to mute · first to <span id="winat">5</span> wins</div>
+  <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · P to pause · M to mute · first to <span id="winat">5</span> wins</div>
 </div>
 <div id="status" class="hud"></div>
 <div id="rotate" class="hud panel">Turn your phone sideways for a bigger view</div>
 <div id="touch">
   <div id="stick"><div id="knob"></div></div>
   <button id="dashbtn" type="button">DASH</button>
+</div>
+
+<div id="menu">
+  <div class="card panel">
+    <h2>PAUSED</h2>
+    <div id="pausedby"></div>
+    <button id="resume" class="big" type="button">RESUME</button>
+    <div class="set">
+      <h3>New match settings</h3>
+      <div class="lbl">Players</div>
+      <div class="opts" id="optsize"><button type="button" data-v="1">1 v 1</button><button type="button" data-v="2">2 v 2</button></div>
+      <div class="lbl">Goals to win</div>
+      <div class="opts" id="optwin"><button type="button" data-v="3">3</button><button type="button" data-v="5">5</button><button type="button" data-v="7">7</button><button type="button" data-v="10">10</button></div>
+      <button id="newmatch" class="big alt" type="button">START NEW MATCH</button>
+      <div id="hostnote"></div>
+    </div>
+  </div>
 </div>
 
 <div id="join">
@@ -141,7 +189,8 @@
       <div class="hint">You are the host: pick the mode, then share the link below. Empty seats are filled by bots.</div>
     </div>
     <button id="play">PLAY</button>
-    <div class="share"><span id="sharelabel">Send colleagues this link to join your game:</span><br><b id="sharelink"></b><br><button class="btn" id="copy2" type="button" style="margin-top:8px">Copy link</button></div>
+    <div class="share"><span id="sharelabel">Send colleagues this link to join your game:</span><br><b id="sharelink"></b><br><button class="btn" id="copy2" type="button" style="margin-top:8px">Copy link</button>
+      <a id="fresh" href="/?new=1" style="display:none;margin-left:10px;font-size:12px;color:#9fc4ff">Start a fresh game</a></div>
   </div>
 </div>
 

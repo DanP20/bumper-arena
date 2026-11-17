@@ -26,20 +26,29 @@ function newRoomCode() {
 let roomName = (params.get('room') || '').toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24);
 // Whoever opens the plain address is the host of a new game; anyone arriving on a ?room= link is a guest of that game.
 if (!roomName) {
-  roomName = newRoomCode();
+  // Coming back to the plain address returns you to the game you last hosted (for 12 hours), so the
+  // link you already shared keeps working. "Start a fresh game" on the name screen (?new=1) makes a new one.
+  let last = null;
+  try { last = JSON.parse(store.get('ba-room') || 'null'); } catch { /* ignore */ }
+  const reuse = !params.has('new') && last && typeof last.code === 'string' && Date.now() - last.t < 12 * 3600e3;
+  roomName = reuse ? last.code.toLowerCase().replace(/[^a-z0-9\-_]/g, '').slice(0, 24) || newRoomCode() : newRoomCode();
+  params.delete('new');
+  store.set('ba-room', JSON.stringify({ code: roomName, t: Date.now() }));
   params.set('room', roomName);
   history.replaceState(null, '', `${location.pathname}?${params}`);
   try { sessionStorage.setItem('ba-host', roomName); } catch { /* private mode */ }
 }
 let isHost = false;
 try { isHost = sessionStorage.getItem('ba-host') === roomName; } catch { /* private mode */ }
+try { if (JSON.parse(store.get('ba-room') || 'null').code === roomName) isHost = true; } catch { /* none saved */ }
 const linkMode = params.get('mode') === '1' ? 1 : params.get('mode') === '2' ? 2 : 0;
 $('roomname').textContent = roomName;
 $('sharelink').textContent = location.href;
 
 let cfg = null, myId = null, joined = false;
 let roster = [];
-const net = { st: 'countdown', cd: 0, sc: [0, 0], w: -1 };
+const net = { st: 'countdown', cd: 0, sc: [0, 0], w: -1, pz: 0 };
+const roomInfo = { size: 2, win: 5, host: -1, hostName: '' };
 
 // ---------- renderer ----------
 const canvas = $('game');
@@ -547,7 +556,7 @@ function scheduleMusic() {
   if (audio.nextStep < ctx.currentTime) audio.nextStep = ctx.currentTime + 0.05;
   while (audio.nextStep < ctx.currentTime + 0.2) {
     const s = audio.step, t = audio.nextStep, bar = Math.floor(s / 16) % 4, k = s % 16, ch = CHORDS[bar];
-    const lively = net.st === 'play' || net.st === 'goal';
+    const lively = !net.pz && (net.st === 'play' || net.st === 'goal');
     if (k % 4 === 0) { tone('sine', 120, 42, 0.22, 0.75, t, audio.music); }
     if (k % 2 === 0) {
       const root = ch[0] - 24 + (k === 14 ? 7 : k % 8 === 6 ? 12 : 0);
@@ -590,15 +599,56 @@ $('copy').onclick = async e => {
   btn.blur();
 };
 
+// ---------- pause menu and match settings ----------
+const pick = { size: 2, win: 5 };
+function wsSend(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+function togglePause() { if (joined) wsSend({ t: 'pause', on: !net.pz }); }
+function markOpts() {
+  for (const b of $('optsize').children) b.classList.toggle('on', Number(b.dataset.v) === pick.size);
+  for (const b of $('optwin').children) b.classList.toggle('on', Number(b.dataset.v) === pick.win);
+}
+function updateMenu() {
+  const menu = $('menu'), amHost = roomInfo.host === myId && myId !== -1;
+  menu.classList.toggle('show', !!net.pz);
+  $('menubtn').textContent = net.pz ? '▶ Resume' : '⏸ Pause';
+  if (!net.pz) return;
+  $('pausedby').textContent = `Paused by ${net.pz}. Anyone can resume.`;
+  pick.size = roomInfo.size; pick.win = roomInfo.win; markOpts();
+  menu.classList.toggle('guest', !amHost);
+  $('hostnote').textContent = amHost
+    ? 'You are the host. Starting a new match resets the score for everyone.'
+    : `Only the host${roomInfo.hostName ? ` (${roomInfo.hostName})` : ''} can change these and start a new match.`;
+}
+function applyRoomInfo(m) {
+  Object.assign(roomInfo, { size: m.size, win: m.win, host: m.host, hostName: m.hostName });
+  $('modename').textContent = `${m.size} v ${m.size}`;
+  $('winat').textContent = m.win;
+  if (params.get('mode') !== String(m.size)) { // keep the invite link in step with the game
+    params.set('mode', String(m.size));
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+    $('sharelink').textContent = location.href;
+  }
+  if (net.pz) { const keep = { ...pick }; updateMenu(); Object.assign(pick, keep); markOpts(); }
+}
+$('menubtn').onclick = e => { togglePause(); e.currentTarget.blur(); };
+$('resume').onclick = () => wsSend({ t: 'pause', on: false });
+$('optsize').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.size = v; markOpts(); } };
+$('optwin').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.win = v; markOpts(); } };
+$('newmatch').onclick = () => wsSend({ t: 'new', size: pick.size, win: pick.win });
+
 // ---------- network ----------
 let ws = null;
 function myTeam() { const me = roster.find(p => p.id === myId); return me ? me.team : -1; }
-let lastCount = -1;
+let lastCount = -1, welcomed = false;
 
 function connect(name) {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/?room=${encodeURIComponent(roomName)}`);
-  ws.onopen = () => { $('status').textContent = ''; ws.send(JSON.stringify({ t: 'join', name, size: modeSize })); };
-  ws.onclose = () => { $('status').textContent = 'Disconnected — reconnecting…'; setTimeout(() => connect(name), 1500); };
+  ws.onopen = () => { $('status').textContent = ''; $('status').classList.remove('bad'); ws.send(JSON.stringify({ t: 'join', name, size: modeSize })); };
+  ws.onclose = () => {
+    const el = $('status'); el.classList.add('bad');
+    el.textContent = welcomed ? 'Connection lost — reconnecting…' : 'Cannot reach the game server yet — retrying… (if this stays, your network may be blocking it)';
+    setTimeout(() => connect(name), 1500);
+  };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.t === 'welcome') {
@@ -606,9 +656,11 @@ function connect(name) {
       if (!cfg) { cfg = m.cfg; $('winat').textContent = cfg.WIN; buildArena(); buildBall(); }
       $('modename').textContent = m.size === 1 ? '1 v 1' : '2 v 2';
       if (myId === -1) $('status').textContent = `Room is full (${m.size * 2} players) — you are spectating.`;
-      else if (m.size !== modeSize) { $('status').textContent = `This room was already set to ${m.size} v ${m.size}.`; setTimeout(() => { $('status').textContent = ''; }, 6000); }
+      else if (m.size !== modeSize && !welcomed) { $('status').textContent = `This room was already set to ${m.size} v ${m.size}.`; setTimeout(() => { $('status').textContent = ''; }, 6000); }
+      else if (myId !== -1) $('status').textContent = '';
+      welcomed = true; modeSize = m.size;
     } else if (m.t === 'roster') {
-      if (cfg) applyRoster(m.players);
+      if (cfg) { applyRoster(m.players); applyRoomInfo(m); }
     } else if (m.t === 's' && cfg) onState(m);
   };
 }
@@ -616,6 +668,7 @@ function connect(name) {
 function onState(m) {
   const prev = net.st;
   net.st = m.st; net.cd = m.cd; net.w = m.w;
+  if ((m.pz || 0) !== net.pz) { net.pz = m.pz || 0; updateMenu(); }
   if (m.sc[0] !== net.sc[0] || m.sc[1] !== net.sc[1] || !joined) { $('s0').textContent = m.sc[0]; $('s1').textContent = m.sc[1]; }
   net.sc = m.sc;
   const snap = m.st === 'countdown' && prev !== 'countdown';
@@ -636,7 +689,8 @@ function onState(m) {
 
 function onEvent(e) {
   const [type, a, b, c] = e;
-  if (type === 'go') { banner('GO!', '#ffe66b', 700); sfx.beep(true); }
+  if (type === 'new') banner(`NEW MATCH<small>${a} v ${a} · first to ${b}</small>`, '#ffe66b', 2200);
+  else if (type === 'go') { banner('GO!', '#ffe66b', 700); sfx.beep(true); }
   else if (type === 'hit') { sfx.hit(c); burst(a, 1.3, b, 0xffffff, 10 + c, 6 + c * 0.3); shake = Math.max(shake, Math.min(0.8, c / 30)); }
   else if (type === 'kick') { sfx.kick(c); burst(a, 0.6, b, 0xffffff, 8, 5); }
   else if (type === 'wall') sfx.wall(c);
@@ -662,6 +716,7 @@ const KEYMAP = { KeyW: 'u', ArrowUp: 'u', KeyS: 'd', ArrowDown: 'd', KeyA: 'l', 
 addEventListener('keydown', e => {
   if (!joined) return;
   if (e.code === 'KeyM') { setMuted(!audio.muted); return; }
+  if (e.code === 'KeyP' || e.code === 'Escape') { if (!e.repeat) togglePause(); return; }
   if (e.code === 'Space') { if (!e.repeat) dashQueued = true; e.preventDefault(); return; }
   const k = KEYMAP[e.code]; if (k) { keys.add(k); e.preventDefault(); }
 });
@@ -716,7 +771,7 @@ function setMode(n) { // host only: the choice travels in the link, so guests ge
 }
 $('mode1').onclick = () => setMode(1);
 $('mode2').onclick = () => setMode(2);
-if (isHost) setMode(modeSize);
+if (isHost) { setMode(modeSize); $('fresh').style.display = 'inline'; }
 else { $('hostopts').style.display = 'none'; $('sharelabel').textContent = 'You were invited to this game. Its link:'; }
 
 // Tell people what the link leads to before they press Play.
@@ -810,4 +865,4 @@ frame();
 
 window.__baReady = true;
 // small hook for automated checks
-window.__ba = { net, players, camera, touchIn, get ball() { return ballView; }, get roster() { return roster; }, get id() { return myId; }, keys };
+window.__ba = { net, players, camera, touchIn, render: () => composer.render(), get ball() { return ballView; }, get roster() { return roster; }, get id() { return myId; }, keys };
