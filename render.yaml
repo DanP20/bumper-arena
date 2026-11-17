@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bumper-arena
+    name: bumperarena
     runtime: node
     plan: free
     buildCommand: npm ci

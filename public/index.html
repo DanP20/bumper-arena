@@ -32,7 +32,10 @@
   #score .num { font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 34px; text-align: center; }
   #score .c { color: var(--cyan); text-shadow: 0 0 14px var(--cyan); }
   #score .m { color: var(--pink); text-shadow: 0 0 14px var(--pink); }
-  #score .dash { opacity: .5; font-size: 24px; }
+  #clockbox { text-align: center; min-width: 64px; }
+  #clock { font-size: 22px; font-variant-numeric: tabular-nums; }
+  #clockbox.golden #clock { color: var(--gold); text-shadow: 0 0 12px var(--gold); font-size: 15px; }
+  #clockbox.low #clock { color: #ff8a7a; }
   #score small { display: block; font-size: 10px; font-weight: 600; opacity: .6; letter-spacing: .12em; text-align: center; }
   #roster { top: 12px; left: 12px; font-size: 13px; min-width: 170px; }
   #roster h1 { margin: 0 0 2px; font-size: 15px; letter-spacing: .18em; color: var(--gold); }
@@ -136,7 +139,7 @@
 <div id="score" class="hud panel">
   <span class="team c">CYAN</span>
   <span class="num c" id="s0">0</span>
-  <span class="dash">:</span>
+  <span id="clockbox"><span id="clock">3:00</span><small id="clocklbl">TIME</small></span>
   <span class="num m" id="s1">0</span>
   <span class="team m">PINK</span>
 </div>
@@ -152,7 +155,7 @@
 
 <div id="bottom" class="hud">
   <div id="dashbar"><div id="dashfill"></div></div>
-  <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · P to pause · M to mute · first to <span id="winat">5</span> wins</div>
+  <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · P to pause · M to mute · <span id="winat">3</span> min match, golden goal if tied</div>
 </div>
 <div id="status" class="hud"></div>
 <div id="rotate" class="hud panel">Turn your phone sideways for a bigger view</div>
@@ -170,8 +173,8 @@
       <h3>New match settings</h3>
       <div class="lbl">Players</div>
       <div class="opts" id="optsize"><button type="button" data-v="1">1 v 1</button><button type="button" data-v="2">2 v 2</button></div>
-      <div class="lbl">Goals to win</div>
-      <div class="opts" id="optwin"><button type="button" data-v="3">3</button><button type="button" data-v="5">5</button><button type="button" data-v="7">7</button><button type="button" data-v="10">10</button></div>
+      <div class="lbl">Match length (a tie goes to golden goal)</div>
+      <div class="opts" id="optwin"><button type="button" data-v="2">2 min</button><button type="button" data-v="3">3 min</button><button type="button" data-v="5">5 min</button><button type="button" data-v="10">10 min</button></div>
       <button id="newmatch" class="big alt" type="button">START NEW MATCH</button>
       <div id="hostnote"></div>
     </div>

@@ -48,7 +48,7 @@ $('sharelink').textContent = location.href;
 let cfg = null, myId = null, joined = false;
 let roster = [];
 const net = { st: 'countdown', cd: 0, sc: [0, 0], w: -1, pz: 0 };
-const roomInfo = { size: 2, win: 5, host: -1, hostName: '' };
+const roomInfo = { size: 2, mins: 3, host: -1, hostName: '' };
 
 // ---------- renderer ----------
 const canvas = $('game');
@@ -600,12 +600,12 @@ $('copy').onclick = async e => {
 };
 
 // ---------- pause menu and match settings ----------
-const pick = { size: 2, win: 5 };
+const pick = { size: 2, mins: 3 };
 function wsSend(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 function togglePause() { if (joined) wsSend({ t: 'pause', on: !net.pz }); }
 function markOpts() {
   for (const b of $('optsize').children) b.classList.toggle('on', Number(b.dataset.v) === pick.size);
-  for (const b of $('optwin').children) b.classList.toggle('on', Number(b.dataset.v) === pick.win);
+  for (const b of $('optwin').children) b.classList.toggle('on', Number(b.dataset.v) === pick.mins);
 }
 function updateMenu() {
   const menu = $('menu'), amHost = roomInfo.host === myId && myId !== -1;
@@ -613,16 +613,16 @@ function updateMenu() {
   $('menubtn').textContent = net.pz ? '▶ Resume' : '⏸ Pause';
   if (!net.pz) return;
   $('pausedby').textContent = `Paused by ${net.pz}. Anyone can resume.`;
-  pick.size = roomInfo.size; pick.win = roomInfo.win; markOpts();
+  pick.size = roomInfo.size; pick.mins = roomInfo.mins; markOpts();
   menu.classList.toggle('guest', !amHost);
   $('hostnote').textContent = amHost
     ? 'You are the host. Starting a new match resets the score for everyone.'
     : `Only the host${roomInfo.hostName ? ` (${roomInfo.hostName})` : ''} can change these and start a new match.`;
 }
 function applyRoomInfo(m) {
-  Object.assign(roomInfo, { size: m.size, win: m.win, host: m.host, hostName: m.hostName });
+  Object.assign(roomInfo, { size: m.size, mins: m.mins, host: m.host, hostName: m.hostName });
   $('modename').textContent = `${m.size} v ${m.size}`;
-  $('winat').textContent = m.win;
+  $('winat').textContent = m.mins;
   if (params.get('mode') !== String(m.size)) { // keep the invite link in step with the game
     params.set('mode', String(m.size));
     history.replaceState(null, '', `${location.pathname}?${params}`);
@@ -633,8 +633,8 @@ function applyRoomInfo(m) {
 $('menubtn').onclick = e => { togglePause(); e.currentTarget.blur(); };
 $('resume').onclick = () => wsSend({ t: 'pause', on: false });
 $('optsize').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.size = v; markOpts(); } };
-$('optwin').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.win = v; markOpts(); } };
-$('newmatch').onclick = () => wsSend({ t: 'new', size: pick.size, win: pick.win });
+$('optwin').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.mins = v; markOpts(); } };
+$('newmatch').onclick = () => wsSend({ t: 'new', size: pick.size, mins: pick.mins });
 
 // ---------- network ----------
 let ws = null;
@@ -653,7 +653,7 @@ function connect(name) {
     const m = JSON.parse(ev.data);
     if (m.t === 'welcome') {
       myId = m.id;
-      if (!cfg) { cfg = m.cfg; $('winat').textContent = cfg.WIN; buildArena(); buildBall(); }
+      if (!cfg) { cfg = m.cfg; buildArena(); buildBall(); }
       $('modename').textContent = m.size === 1 ? '1 v 1' : '2 v 2';
       if (myId === -1) $('status').textContent = `Room is full (${m.size * 2} players) — you are spectating.`;
       else if (m.size !== modeSize && !welcomed) { $('status').textContent = `This room was already set to ${m.size} v ${m.size}.`; setTimeout(() => { $('status').textContent = ''; }, 6000); }
@@ -668,6 +668,14 @@ function connect(name) {
 function onState(m) {
   const prev = net.st;
   net.st = m.st; net.cd = m.cd; net.w = m.w;
+  if (m.tl !== net.tl || m.gg !== net.gg) {
+    net.tl = m.tl; net.gg = m.gg;
+    $('clock').textContent = m.gg ? 'GOLDEN GOAL' : `${Math.floor(m.tl / 60)}:${String(m.tl % 60).padStart(2, '0')}`;
+    $('clocklbl').textContent = m.gg ? 'NEXT GOAL WINS' : 'TIME';
+    $('clockbox').classList.toggle('golden', !!m.gg);
+    $('clockbox').classList.toggle('low', !m.gg && m.tl <= 10);
+    if (!m.gg && m.tl <= 5 && m.tl > 0 && m.st === 'play') sfx.beep(false);
+  }
   if ((m.pz || 0) !== net.pz) { net.pz = m.pz || 0; updateMenu(); }
   if (m.sc[0] !== net.sc[0] || m.sc[1] !== net.sc[1] || !joined) { $('s0').textContent = m.sc[0]; $('s1').textContent = m.sc[1]; }
   net.sc = m.sc;
@@ -689,7 +697,13 @@ function onState(m) {
 
 function onEvent(e) {
   const [type, a, b, c] = e;
-  if (type === 'new') banner(`NEW MATCH<small>${a} v ${a} · first to ${b}</small>`, '#ffe66b', 2200);
+  if (type === 'new') banner(`NEW MATCH<small>${a} v ${a} · ${b} minutes</small>`, '#ffe66b', 2200);
+  else if (type === 'golden') { banner('GOLDEN GOAL<small>scores level — next goal wins</small>', '#ffe66b', 2600); sfx.beep(true); setTimeout(() => sfx.beep(true), 250); }
+  else if (type === 'time') {
+    const mine = a === myTeam();
+    banner(`${TEAM_NAME[a]} WINS!<small>full time</small><small>new match starting soon…</small>`, TEAM_CSS[a], 6500);
+    sfx.beep(true); setTimeout(() => sfx.win(mine || myTeam() === -1), 400);
+  }
   else if (type === 'go') { banner('GO!', '#ffe66b', 700); sfx.beep(true); }
   else if (type === 'hit') { sfx.hit(c); burst(a, 1.3, b, 0xffffff, 10 + c, 6 + c * 0.3); shake = Math.max(shake, Math.min(0.8, c / 30)); }
   else if (type === 'kick') { sfx.kick(c); burst(a, 0.6, b, 0xffffff, 8, 5); }

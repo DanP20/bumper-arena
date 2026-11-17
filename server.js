@@ -17,12 +17,12 @@ const CFG = {
   GW: 4.6, GD: 3,             // goal half-width and depth
   PR: 1.3, BR: 0.85,          // player and ball radius
   BUMPERS: [[0, 7.6], [0, -7.6]], BUMPER_R: 1.4,
-  WIN: Number(process.env.WIN) || 5, DASH_CD: 2.2,
+  MATCH_S: Number(process.env.MATCH_S) || 180, DASH_CD: 2.2, // match length in seconds; a tie goes to golden goal
 };
 const { L, W, CR, GW, GD, PR, BR, BUMPER_R } = CFG;
-const ACCEL = 28, DRAG = 1.2, BALL_DRAG = 0.36, BALL_MAX = 38;
+const ACCEL = 32, DRAG = 1.5, BALL_DRAG = 0.6, BALL_MAX = 38;
 const DASH_IMPULSE = 16, DASH_TIME = 0.28;
-const TURN = 4.8, GRIP = 0.35; // steering rate (rad/s) and sideways grip for human-driven cars
+const TURN = 4.8, GRIP = 2.2; // steering rate (rad/s) and sideways grip for human-driven cars
 const P_MASS = 3, B_MASS = 1;
 const COUNTDOWN_MS = 3000, GOAL_MS = 2600, OVER_MS = 7000;
 const BOT_NAMES = ['Bolt', 'Dynamo', 'Pinball', 'Ricochet', 'Zap', 'Comet', 'Tumble', 'Wobble'];
@@ -151,7 +151,7 @@ function getRoom(name, size) {
       ball: { x: 0, z: 0, vx: 0, vz: 0, m: B_MASS, r: BR },
       score: [0, 0], state: 'countdown', until: Date.now() + COUNTDOWN_MS,
       lastTouch: null, events: [], winner: -1,
-      win: CFG.WIN, order: [], paused: null,
+      len: CFG.MATCH_S * 1000, timeLeft: CFG.MATCH_S * 1000, golden: false, order: [], paused: null,
     };
     for (let team = 0; team < 2; team++)
       for (let slot = 0; slot < room.size; slot++) makePlayer(room, team, slot, true, botName(room), null);
@@ -172,7 +172,7 @@ function sendRoster(room) {
   broadcast(room, {
     t: 'roster',
     players: room.players.map(p => ({ id: p.id, name: p.name, team: p.team, slot: p.slot, bot: p.bot, goals: p.goals })),
-    spectators: room.spectators.size, size: room.size, win: room.win,
+    spectators: room.spectators.size, size: room.size, mins: Math.round(room.len / 6000) / 10,
     host: room.order[0] && room.order[0].player ? room.order[0].player.id : -1,
     hostName: room.order[0] ? room.order[0].pname : '',
   });
@@ -207,7 +207,7 @@ function joinRoom(room, ws, rawName) {
   const fresh = humans(room).length === 0;
   room.order.push(ws); // join order: the first one still here is the host
   seat(room, ws);
-  if (fresh && ws.player) { room.score = [0, 0]; for (const p of room.players) p.goals = 0; kickoff(room); }
+  if (fresh && ws.player) { resetMatch(room); kickoff(room); }
   sendRoster(room);
 }
 
@@ -231,18 +231,22 @@ function setPause(room, on, by) {
 }
 
 // Host only: restart with (possibly) a different team size and goal target.
-function newMatch(room, size, win) {
-  room.win = win;
+function resetMatch(room) {
+  room.score = [0, 0]; room.winner = -1; room.timeLeft = room.len; room.golden = false;
+  for (const p of room.players) p.goals = 0;
+}
+
+function newMatch(room, size, mins) {
+  room.len = mins * 60000;
   if (size !== room.size) {
     room.size = size; room.players = []; room.spectators = new Set();
     for (let team = 0; team < 2; team++)
       for (let slot = 0; slot < size; slot++) makePlayer(room, team, slot, true, botName(room), null);
     for (const ws of room.order) seat(room, ws);
   }
-  room.score = [0, 0]; room.winner = -1; room.paused = null;
-  for (const p of room.players) p.goals = 0;
+  resetMatch(room); room.paused = null;
   kickoff(room);
-  room.events.push(['new', size, win]);
+  room.events.push(['new', size, mins]);
   sendRoster(room);
 }
 
@@ -303,7 +307,8 @@ function collide(room, a, b, bIsBall) {
   b.x += nx * overlap * (ma / tot); b.z += nz * overlap * (ma / tot);
   const rel = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
   if (rel >= 0) return;
-  const e = bIsBall ? 0.88 : 0.95;
+  // gentle touches barely bounce the puck (so it can be dribbled); hard hits and dashes still send it flying
+  const e = !bIsBall ? 0.95 : a.dashT > 0 ? 0.9 : clamp(0.15 + (-rel - 7) * 0.06, 0.15, 0.85);
   const j = -(1 + e) * rel / (1 / ma + 1 / mb);
   a.vx -= j / ma * nx; a.vz -= j / ma * nz;
   b.vx += j / mb * nx; b.vz += j / mb * nz;
@@ -363,11 +368,23 @@ function stepRoom(room, now) {
   if (room.state === 'countdown' && now >= room.until) { room.state = 'play'; room.events.push(['go']); }
   else if (room.state === 'goal' && now >= room.until) kickoff(room);
   else if (room.state === 'over' && now >= room.until) {
-    room.score = [0, 0]; room.winner = -1;
-    for (const p of room.players) p.goals = 0;
+    resetMatch(room);
     kickoff(room); sendRoster(room);
   }
   if (!playing) return;
+
+  // match clock: runs only while the puck is live
+  if (room.state === 'play' && !room.golden) {
+    room.timeLeft -= 1000 / TICK_HZ;
+    if (room.timeLeft <= 0) {
+      room.timeLeft = 0;
+      if (room.score[0] !== room.score[1]) {
+        room.winner = room.score[0] > room.score[1] ? 0 : 1;
+        room.state = 'over'; room.until = now + OVER_MS;
+        room.events.push(['time', room.winner]);
+      } else { room.golden = true; room.events.push(['golden']); }
+    }
+  }
 
   for (const p of room.players) {
     if (p.bot && --p.think <= 0) { p.think = 3; botThink(room, p); }
@@ -395,7 +412,7 @@ function stepRoom(room, now) {
         }
       } else {
         // humans drive the car: left/right steer, up accelerates, down reverses
-        const thr = -p.iz, steer = p.ix * (thr < 0 ? -1 : 1);
+        const thr = -p.iz, steer = p.ix; // left always turns the car left, also in reverse
         p.h += steer * TURN * DT;
         const fx = Math.cos(p.h), fz = Math.sin(p.h);
         if (p.wantDash) {
@@ -441,7 +458,7 @@ function stepRoom(room, now) {
         if (toucher.team === team) { toucher.goals++; who = toucher.name; }
         else who = toucher.name + ' (own goal)';
       }
-      if (room.score[team] >= room.win) {
+      if (room.golden) { // golden goal: first goal of extra time wins
         room.state = 'over'; room.winner = team; room.until = now + OVER_MS;
       } else { room.state = 'goal'; room.until = now + GOAL_MS; }
       room.events.push(['goal', team, who]);
@@ -455,7 +472,7 @@ function snapshot(room, now) {
   const b = room.ball;
   const msg = {
     t: 's', st: room.state, cd: Math.max(0, room.until - (room.paused ? room.paused.at : now)), sc: room.score, w: room.winner,
-    pz: room.paused ? room.paused.by : 0,
+    pz: room.paused ? room.paused.by : 0, tl: Math.ceil(room.timeLeft / 1000), gg: room.golden ? 1 : 0,
     b: [r2(b.x), r2(b.z), r2(b.vx), r2(b.vz)],
     p: room.players.map(p => [p.id, r2(p.x), r2(p.z), r2(p.vx), r2(p.vz), Math.max(0, r2(p.dashCd)), p.dashT > 0 ? 1 : 0, r2(p.h)]),
   };
@@ -497,8 +514,8 @@ wss.on('connection', (ws, req) => {
       setPause(room, !!m.on, ws.pname);
     } else if (m.t === 'new' && room.order[0] === ws) {
       const size = Number(m.size) === 1 ? 1 : 2;
-      const win = clamp(Math.round(Number(m.win)) || CFG.WIN, 1, 15);
-      newMatch(room, size, win);
+      const mins = clamp(Math.round(Number(m.mins)) || 3, 1, 10);
+      newMatch(room, size, mins);
     }
   });
   const bye = () => { if (room) { leaveRoom(room, ws); room = null; } };
