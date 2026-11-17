@@ -145,6 +145,21 @@
   </div>
 </div>
 
-<script type="module" src="/main.js"></script>
+<script>
+  // If the game script fails in this browser, say so on the name screen instead of leaving a dead Play button.
+  (function () {
+    var shown = false;
+    function fail(msg) {
+      if (shown || window.__baReady) return; shown = true;
+      var el = document.getElementById('joininfo');
+      el.style.borderColor = '#ff6b6b'; el.style.background = 'rgba(255,80,80,.15)';
+      el.textContent = 'The game could not start in this browser (' + msg + '). Try the latest Chrome, Safari, Edge or Firefox.';
+    }
+    window.addEventListener('error', function (e) { fail(e.message || 'script error'); });
+    window.addEventListener('unhandledrejection', function (e) { fail((e.reason && e.reason.message) || 'load error'); });
+    setTimeout(function () { if (!window.__baReady) fail('it did not load'); }, 15000);
+  })();
+</script>
+<script defer src="/game.js"></script>
 </body>
 </html>

@@ -38,10 +38,36 @@ const MIME = {
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
 
+// The client is bundled into one plain script (three.js included) so it also runs in browsers
+// without import-map support, and loads in a single request. Rebuilt whenever main.js changes.
+let bundle = { mtime: 0, data: null };
+function clientBundle() {
+  const entry = path.join(PUBLIC_DIR, 'main.js');
+  try {
+    const mtime = fs.statSync(entry).mtimeMs;
+    if (mtime !== bundle.mtime) {
+      const out = require('esbuild').buildSync({
+        entryPoints: [entry], bundle: true, format: 'iife', minify: true, target: ['es2019'], write: false, logLevel: 'silent',
+      });
+      bundle = { mtime, data: Buffer.from(out.outputFiles[0].contents) };
+    }
+    return bundle.data;
+  } catch (err) {
+    console.warn('Client bundle failed, falling back to module loading:', err.message);
+    return Buffer.from("import('/main.js');");
+  }
+}
+clientBundle();
+
 const server = http.createServer((req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); }
   catch { res.writeHead(400).end(); return; }
+  if (urlPath === '/game.js') {
+    res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+    res.end(clientBundle());
+    return;
+  }
   if (urlPath === '/api/room') { // lets the join screen say whose game a link leads to before joining
     const name = cleanRoom(new URL(req.url, 'http://x').searchParams.get('room'));
     const room = rooms.get(name);

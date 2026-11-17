@@ -6,6 +6,11 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const $ = id => document.getElementById(id);
+// Storage can be blocked (private mode, in-app browsers); the game must still start without it.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* blocked */ } },
+};
 const TEAM_HEX = [0x22e5ff, 0xff4fd8];
 const TEAM_CSS = ['#22e5ff', '#ff4fd8'];
 const TEAM_NAME = ['CYAN', 'PINK'];
@@ -472,7 +477,7 @@ function stepParticles(dt) {
 }
 
 // ---------- audio (all generated) ----------
-const audio = { ctx: null, master: null, muted: localStorage.getItem('ba-muted') === '1', nextStep: 0, step: 0 };
+const audio = { ctx: null, master: null, muted: store.get('ba-muted') === '1', nextStep: 0, step: 0 };
 function initAudio() {
   if (audio.ctx) return;
   try {
@@ -491,7 +496,7 @@ function initAudio() {
   } catch { audio.ctx = null; }
 }
 function setMuted(m) {
-  audio.muted = m; localStorage.setItem('ba-muted', m ? '1' : '0');
+  audio.muted = m; store.set('ba-muted', m ? '1' : '0');
   $('mute').textContent = m ? '🔇' : '🔊';
   if (audio.ctx) audio.master.gain.setTargetAtTime(m ? 0 : 0.7, audio.ctx.currentTime, 0.03);
 }
@@ -701,9 +706,9 @@ function sendInput(now) {
 
 // ---------- join screen ----------
 const nameInput = $('name');
-let modeSize = linkMode || (isHost && localStorage.getItem('ba-mode') === '1' ? 1 : 2);
+let modeSize = linkMode || (isHost && store.get('ba-mode') === '1' ? 1 : 2);
 function setMode(n) { // host only: the choice travels in the link, so guests get the same game
-  modeSize = n; localStorage.setItem('ba-mode', String(n));
+  modeSize = n; store.set('ba-mode', String(n));
   $('mode1').classList.toggle('on', n === 1); $('mode2').classList.toggle('on', n === 2);
   params.set('mode', String(n));
   history.replaceState(null, '', `${location.pathname}?${params}`);
@@ -732,12 +737,12 @@ async function refreshJoinInfo() {
   setTimeout(refreshJoinInfo, 2000);
 }
 refreshJoinInfo();
-nameInput.value = localStorage.getItem('ba-name') || '';
+nameInput.value = store.get('ba-name') || '';
 function start() {
   if (joined) return;
   joined = true;
   const name = nameInput.value.trim() || 'Player';
-  localStorage.setItem('ba-name', name);
+  store.set('ba-name', name);
   $('join').style.display = 'none';
   document.body.classList.add('playing');
   nameInput.blur();
@@ -803,5 +808,6 @@ function frame() {
 }
 frame();
 
+window.__baReady = true;
 // small hook for automated checks
 window.__ba = { net, players, camera, touchIn, get ball() { return ballView; }, get roster() { return roster; }, get id() { return myId; }, keys };
