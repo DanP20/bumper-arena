@@ -147,7 +147,7 @@ function getRoom(name, size) {
   let room = rooms.get(name);
   if (!room) {
     room = {
-      name, size: size === 1 ? 1 : 2, players: [], spectators: new Set(),
+      name, size: size === 1 ? 1 : 2, diff: 2, players: [], spectators: new Set(),
       ball: { x: 0, z: 0, vx: 0, vz: 0, m: B_MASS, r: BR },
       score: [0, 0], state: 'countdown', until: Date.now() + COUNTDOWN_MS,
       lastTouch: null, events: [], winner: -1,
@@ -172,7 +172,7 @@ function sendRoster(room) {
   broadcast(room, {
     t: 'roster',
     players: room.players.map(p => ({ id: p.id, name: p.name, team: p.team, slot: p.slot, bot: p.bot, goals: p.goals })),
-    spectators: room.spectators.size, size: room.size, mins: Math.round(room.len / 6000) / 10,
+    spectators: room.spectators.size, size: room.size, mins: Math.round(room.len / 6000) / 10, diff: room.diff,
     host: room.order[0] && room.order[0].player ? room.order[0].player.id : -1,
     hostName: room.order[0] ? room.order[0].pname : '',
   });
@@ -236,8 +236,8 @@ function resetMatch(room) {
   for (const p of room.players) p.goals = 0;
 }
 
-function newMatch(room, size, mins) {
-  room.len = mins * 60000;
+function newMatch(room, size, mins, diff) {
+  room.len = mins * 60000; room.diff = diff;
   if (size !== room.size) {
     room.size = size; room.players = []; room.spectators = new Set();
     for (let team = 0; team < 2; team++)
@@ -246,7 +246,7 @@ function newMatch(room, size, mins) {
   }
   resetMatch(room); room.paused = null;
   kickoff(room);
-  room.events.push(['new', size, mins]);
+  room.events.push(['new', size, mins, diff]);
   sendRoster(room);
 }
 
@@ -322,10 +322,18 @@ function collide(room, a, b, bIsBall) {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+// Bot difficulty: 1 easy, 2 normal, 3 hard. skill = share of a person's acceleration, think = ticks between decisions,
+// look = how far ahead (s) they read the puck, dash = chance per decision to dash when lined up, top = top speed they aim for.
+const BOT_LEVELS = {
+  1: { skill: 0.42, think: 8, look: 0.1, dash: 0.02, top: 15 },
+  2: { skill: 0.6, think: 5, look: 0.22, dash: 0.08, top: 21 },
+  3: { skill: 0.9, think: 3, look: 0.3, dash: 0.22, top: 26 },
+};
 function botThink(room, p) {
+  const lv = BOT_LEVELS[room.diff] || BOT_LEVELS[2];
   const dir = p.team === 0 ? 1 : -1;
   const b = room.ball;
-  const px = clamp(b.x + b.vx * 0.22, -L, L), pz = clamp(b.z + b.vz * 0.22, -W, W);
+  const px = clamp(b.x + b.vx * lv.look, -L, L), pz = clamp(b.z + b.vz * lv.look, -W, W);
   const mate = room.players.find(q => q.team === p.team && q !== p);
   const myD = Math.hypot(px - p.x, pz - p.z);
   let attack;
@@ -343,7 +351,7 @@ function botThink(room, p) {
     const align = ((px - p.x) * dx + (pz - p.z) * dz) / (myD || 1);
     if (align > 0.7) {
       tx = px + dx * 2.5; tz = pz + dz * 2.5;
-      if (myD < 5.5 && p.dashCd <= 0 && Math.random() < 0.08) dash = true;
+      if (myD < 5.5 && p.dashCd <= 0 && Math.random() < lv.dash) dash = true;
     } else {
       const off = PR + BR + 0.8;
       tx = px - dx * off; tz = pz - dz * off;
@@ -355,11 +363,10 @@ function botThink(room, p) {
   tx = clamp(tx, -L + PR, L - PR); tz = clamp(tz, -W + PR, W - PR);
   const ex = tx - p.x, ez = tz - p.z, d = Math.hypot(ex, ez);
   if (d < 0.4) { p.ix = p.iz = 0; return; }
-  const want = Math.min(21, d * 4);
+  const want = Math.min(lv.top, d * 4);
   let sx = ex / d * want - p.vx, sz = ez / d * want - p.vz;
   const sn = Math.hypot(sx, sz) || 1;
-  const skill = 0.6; // bots use a bit over half the acceleration a person has
-  p.ix = sx / sn * skill; p.iz = sz / sn * skill;
+  p.ix = sx / sn * lv.skill; p.iz = sz / sn * lv.skill;
   if (dash) p.wantDash = true;
 }
 
@@ -387,7 +394,7 @@ function stepRoom(room, now) {
   }
 
   for (const p of room.players) {
-    if (p.bot && --p.think <= 0) { p.think = 5; botThink(room, p); } // bots react ~6 times a second
+    if (p.bot && --p.think <= 0) { p.think = (BOT_LEVELS[room.diff] || BOT_LEVELS[2]).think; botThink(room, p); }
   }
   const b = room.ball;
   for (let s = 0; s < SUBSTEPS; s++) {
@@ -518,7 +525,8 @@ wss.on('connection', (ws, req) => {
     } else if (m.t === 'new' && room.order[0] === ws) {
       const size = Number(m.size) === 1 ? 1 : 2;
       const mins = clamp(Math.round(Number(m.mins)) || 3, 1, 10);
-      newMatch(room, size, mins);
+      const diff = clamp(Math.round(Number(m.diff)) || room.diff, 1, 3);
+      newMatch(room, size, mins, diff);
     }
   });
   const bye = () => { if (room) { leaveRoom(room, ws); room = null; } };

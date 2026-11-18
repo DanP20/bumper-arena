@@ -48,7 +48,7 @@ $('sharelink').textContent = location.href;
 let cfg = null, myId = null, joined = false;
 let roster = [];
 const net = { st: 'countdown', cd: 0, sc: [0, 0], w: -1, pz: 0 };
-const roomInfo = { size: 2, mins: 3, host: -1, hostName: '' };
+const roomInfo = { size: 2, mins: 3, diff: 2, host: -1, hostName: '' };
 
 // ---------- renderer ----------
 const canvas = $('game');
@@ -600,12 +600,13 @@ $('copy').onclick = async e => {
 };
 
 // ---------- pause menu and match settings ----------
-const pick = { size: 2, mins: 3 };
+const pick = { size: 2, mins: 3, diff: 2 };
 function wsSend(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 function togglePause() { if (joined) wsSend({ t: 'pause', on: !net.pz }); }
 function markOpts() {
   for (const b of $('optsize').children) b.classList.toggle('on', Number(b.dataset.v) === pick.size);
   for (const b of $('optwin').children) b.classList.toggle('on', Number(b.dataset.v) === pick.mins);
+  for (const b of $('optdiff').children) b.classList.toggle('on', Number(b.dataset.v) === pick.diff);
 }
 function updateMenu() {
   const menu = $('menu'), amHost = roomInfo.host === myId && myId !== -1;
@@ -613,14 +614,14 @@ function updateMenu() {
   $('menubtn').textContent = net.pz ? '▶ Resume' : '⏸ Pause';
   if (!net.pz) return;
   $('pausedby').textContent = `Paused by ${net.pz}. Anyone can resume.`;
-  pick.size = roomInfo.size; pick.mins = roomInfo.mins; markOpts();
+  pick.size = roomInfo.size; pick.mins = roomInfo.mins; pick.diff = roomInfo.diff; markOpts();
   menu.classList.toggle('guest', !amHost);
   $('hostnote').textContent = amHost
     ? 'You are the host. Starting a new match resets the score for everyone.'
     : `Only the host${roomInfo.hostName ? ` (${roomInfo.hostName})` : ''} can change these and start a new match.`;
 }
 function applyRoomInfo(m) {
-  Object.assign(roomInfo, { size: m.size, mins: m.mins, host: m.host, hostName: m.hostName });
+  Object.assign(roomInfo, { size: m.size, mins: m.mins, diff: m.diff || 2, host: m.host, hostName: m.hostName });
   $('modename').textContent = `${m.size} v ${m.size}`;
   $('winat').textContent = m.mins;
   if (params.get('mode') !== String(m.size)) { // keep the invite link in step with the game
@@ -634,7 +635,8 @@ $('menubtn').onclick = e => { togglePause(); e.currentTarget.blur(); };
 $('resume').onclick = () => wsSend({ t: 'pause', on: false });
 $('optsize').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.size = v; markOpts(); } };
 $('optwin').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.mins = v; markOpts(); } };
-$('newmatch').onclick = () => wsSend({ t: 'new', size: pick.size, mins: pick.mins });
+$('optdiff').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.diff = v; markOpts(); } };
+$('newmatch').onclick = () => wsSend({ t: 'new', size: pick.size, mins: pick.mins, diff: pick.diff });
 
 // ---------- network ----------
 let ws = null;
@@ -697,7 +699,7 @@ function onState(m) {
 
 function onEvent(e) {
   const [type, a, b, c] = e;
-  if (type === 'new') banner(`NEW MATCH<small>${a} v ${a} · ${b} minutes</small>`, '#ffe66b', 2200);
+  if (type === 'new') banner(`NEW MATCH<small>${a} v ${a} · ${b} minutes · ${['', 'easy', 'normal', 'hard'][c] || 'normal'} bots</small>`, '#ffe66b', 2200);
   else if (type === 'golden') { banner('GOLDEN GOAL<small>scores level — next goal wins</small>', '#ffe66b', 2600); sfx.beep(true); setTimeout(() => sfx.beep(true), 250); }
   else if (type === 'time') {
     const mine = a === myTeam();
