@@ -636,6 +636,16 @@ $('resume').onclick = () => wsSend({ t: 'pause', on: false });
 $('optsize').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.size = v; markOpts(); } };
 $('optwin').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.mins = v; markOpts(); } };
 $('optdiff').onclick = e => { const v = Number(e.target.dataset.v); if (v) { pick.diff = v; markOpts(); } };
+// Each player's own choice, kept on their device: arrows as screen directions (default) or steer/throttle.
+let driveMode = store.get('ba-drive') === 'car' ? 'car' : 'dir';
+function markDrive() {
+  for (const b of $('optdrive').children) b.classList.toggle('on', b.dataset.v === driveMode);
+  $('keyhint').textContent = driveMode === 'car'
+    ? 'W/↑ drive · S/↓ reverse · A/D or ←/→ steer'
+    : 'WASD or arrows move you that way on screen';
+}
+$('optdrive').onclick = e => { const v = e.target.dataset.v; if (v) { driveMode = v; store.set('ba-drive', v); markDrive(); e.target.blur(); } };
+markDrive();
 $('newmatch').onclick = () => wsSend({ t: 'new', size: pick.size, mins: pick.mins, diff: pick.diff });
 
 // ---------- network ----------
@@ -697,8 +707,10 @@ function onState(m) {
   if (m.e) for (const e of m.e) onEvent(e);
 }
 
+let hinted = false;
 function onEvent(e) {
   const [type, a, b, c] = e;
+  if (type === 'go' && !hinted && !isTouch) { hinted = true; toast(driveMode === 'car' ? 'Arrows steer and drive · Space dashes' : 'Arrows move you that way · Space dashes · other controls under Pause'); }
   if (type === 'new') banner(`NEW MATCH<small>${a} v ${a} · ${b} minutes · ${['', 'easy', 'normal', 'hard'][c] || 'normal'} bots</small>`, '#ffe66b', 2200);
   else if (type === 'golden') { banner('GOLDEN GOAL<small>scores level — next goal wins</small>', '#ffe66b', 2600); sfx.beep(true); setTimeout(() => sfx.beep(true), 250); }
   else if (type === 'time') {
@@ -766,14 +778,15 @@ if (isTouch) document.body.classList.add('touch');
 function sendInput(now) {
   if (!ws || ws.readyState !== 1 || myId == null || myId < 0) return;
   const cl = v => Math.max(-1, Math.min(1, Math.round(v * 10) / 10));
-  // Touch stick: the car goes exactly the way the stick is pushed on screen. Keyboard: steer and throttle.
+  // Touch stick and 'screen direction' keys: the car goes the way you push on screen. 'Car steering' keys: steer and throttle.
   const stick = Math.hypot(touchIn.x, touchIn.z) > 0;
   const x = stick ? cl(touchIn.x) : cl((keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0));
   const z = stick ? cl(touchIn.z) : cl((keys.has('d') ? 1 : 0) - (keys.has('u') ? 1 : 0));
-  const sig = x + ',' + z + (stick ? 'a' : '');
+  const direct = stick || driveMode !== 'car' || (isTouch && !keys.size);
+  const sig = x + ',' + z + (direct ? 'a' : '');
   if (sig !== lastSent && !dashQueued && now - lastSendT < 45) return; // cap analog stick updates at ~22 a second
   if (sig !== lastSent || dashQueued || now - lastSendT > 250) {
-    ws.send(JSON.stringify({ t: 'in', x, z, d: dashQueued ? 1 : 0, a: stick || (isTouch && !keys.size) ? 1 : 0 }));
+    ws.send(JSON.stringify({ t: 'in', x, z, d: dashQueued ? 1 : 0, a: direct ? 1 : 0 }));
     lastSent = sig; lastSendT = now; dashQueued = false;
   }
 }

@@ -105,7 +105,7 @@
   #menu .opts { display: flex; gap: 6px; }
   #menu .opts button { flex: 1; padding: 8px 4px; font-size: 15px; font-weight: 800; border-radius: 9px; border: 1px solid rgba(140,170,255,.4); background: rgba(255,255,255,.06); color: #e9f1ff; }
   #menu .opts button.on { border-color: var(--gold); color: var(--gold); background: rgba(255,230,107,.14); }
-  #menu.guest .opts button, #menu.guest #newmatch { opacity: .4; pointer-events: none; }
+  #menu.guest .set .opts button, #menu.guest #newmatch { opacity: .4; pointer-events: none; }
   #hostnote { font-size: 11px; opacity: .65; margin-top: 8px; }
   @media (max-height: 460px) { #menu .card { padding: 10px 18px; } #menu h2 { font-size: 20px; } #menu h3 { margin-top: 8px; } #menu .big { padding: 7px; } #pausedby { margin-bottom: 6px; } }
   @media (max-width: 700px) { #copy { display: none; } }
@@ -155,7 +155,7 @@
 
 <div id="bottom" class="hud">
   <div id="dashbar"><div id="dashfill"></div></div>
-  <div class="keys">W/↑ drive · S/↓ reverse · A/D or ←/→ steer · SPACE to dash · P to pause · M to mute · <span id="winat">3</span> min match, golden goal if tied</div>
+  <div class="keys"><span id="keyhint"></span> · SPACE to dash · P to pause · M to mute · <span id="winat">3</span> min match, golden goal if tied</div>
 </div>
 <div id="status" class="hud"></div>
 <div id="rotate" class="hud panel">Turn your phone sideways for a bigger view</div>
@@ -169,6 +169,10 @@
     <h2>PAUSED</h2>
     <div id="pausedby"></div>
     <button id="resume" class="big" type="button">RESUME</button>
+    <div class="mine">
+      <div class="lbl">Your keyboard controls</div>
+      <div class="opts" id="optdrive"><button type="button" data-v="dir">Screen direction</button><button type="button" data-v="car">Car steering</button></div>
+    </div>
     <div class="set">
       <h3>New match settings</h3>
       <div class="lbl">Players</div>

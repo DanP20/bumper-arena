@@ -412,7 +412,9 @@ function stepRoom(room, now) {
             room.events.push(['dash', p.id]);
           }
         }
-        p.vx += ix * ACCEL * DT; p.vz += iz * ACCEL * DT;
+        // people brake harder than they speed up, so pushing back against a slide catches it sooner
+        const brake = !p.bot && p.vx * ix + p.vz * iz < 0 ? 1.7 : 1;
+        p.vx += ix * ACCEL * brake * DT; p.vz += iz * ACCEL * brake * DT;
         const steerByStick = !p.bot && n > 0.2;
         if (steerByStick || Math.hypot(p.vx, p.vz) > 0.8) {
           let da = (steerByStick ? Math.atan2(iz, ix) : Math.atan2(p.vz, p.vx)) - p.h;
